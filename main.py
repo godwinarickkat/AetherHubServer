@@ -13,9 +13,13 @@ app = FastAPI()
 
 class OTPAuthentication(BaseModel):
     otp_token: str  # This is the access_token from frontend
-
 @app.post("/login")
 async def login_func(data: OTPAuthentication):
+    print("Received OTP token:", data.otp_token)
+
+    if not MSG91_AUTH_KEY:
+        raise HTTPException(status_code=500, detail="MSG91_AUTH_KEY is not set")
+
     if not data.otp_token.strip():
         raise HTTPException(status_code=400, detail="OTP token is required")
 
@@ -25,20 +29,23 @@ async def login_func(data: OTPAuthentication):
         "access_token": data.otp_token
     }
 
-    async with httpx.AsyncClient() as client:
-        # ✅ Make GET request (not POST)
-        response = await client.get(MSG91_VERIFY_URL, headers=headers)
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(MSG91_VERIFY_URL, headers=headers)
+            print("MSG91 status code:", response.status_code)
+            print("MSG91 response body:", response.text)
+    except Exception as e:
+        print("Exception when calling MSG91:", str(e))
+        raise HTTPException(status_code=500, detail="Failed to connect to MSG91")
 
     if response.status_code != 200:
-        raise HTTPException(status_code=500, detail="Failed to verify OTP. MSG91 service error.")
+        raise HTTPException(status_code=500, detail="MSG91 service error")
 
     try:
         res_json = response.json()
-        print("MSG91 JSON Response:", res_json)
     except Exception:
-        raise HTTPException(status_code=500, detail="Invalid response from MSG91")
+        raise HTTPException(status_code=500, detail="MSG91 returned invalid JSON")
 
-    # Handle successful or already-verified token
     if res_json.get("type") == "success":
         return {
             "success": True,
@@ -53,7 +60,4 @@ async def login_func(data: OTPAuthentication):
             "message": "OTP already verified earlier"
         }
 
-    raise HTTPException(
-        status_code=400,
-        detail=msg
-    )
+    raise HTTPException(status_code=400, detail=msg)
